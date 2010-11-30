@@ -74,11 +74,19 @@ static void jg_post_clo_init(void)
 }
 
 /* these must add up to the word size in bits */
+#if VG_WORDSIZE == 8
 #define PAGE_BITS 12
 #define BIG_MAP_BITS 19
 #define MAIN_MAP_BITS 15
 #define INT_BITS 5
 #define SUB_MAP_BITS 13
+#else
+#define PAGE_BITS 12
+#define BIG_MAP_BITS 0
+#define MAIN_MAP_BITS 8
+#define INT_BITS 5
+#define SUB_MAP_BITS 7
+#endif
 
 #define BIG_MAP_SIZE ((long long)1<<BIG_MAP_BITS)
 #define MAIN_MAP_SIZE ((long long)1<<MAIN_MAP_BITS)
@@ -344,6 +352,24 @@ static IRAtom* assignNew (IRSB* sbOut, IRType ty, IRExpr* e)
     return mkexpr(t);
 }
 
+#if VG_WORDSIZE == 8
+#define FIELD_Uw U64
+#define Ity_Iw Ity_I64
+#define Iop_CmpLTwU Iop_CmpLT64U
+#define mkUw mkU64
+#define Iop_1Utow Iop_1Uto64
+#define Iop_Orw Iop_Or64
+#define Iop_wto1 Iop_64to1
+#else
+#define FIELD_Uw U32
+#define Ity_Iw Ity_I32
+#define Iop_CmpLTwU Iop_CmpLT32U
+#define mkUw mkU32
+#define Iop_1Utow Iop_1Uto32
+#define Iop_Orw Iop_Or32
+#define Iop_wto1 Iop_32to1
+#endif
+
 static void
 instrument_store(IRSB* sbOut, IRExpr* addr)
 {
@@ -351,13 +377,13 @@ instrument_store(IRSB* sbOut, IRExpr* addr)
     IRDirty*   di;
 
     t1 = assignNew(sbOut, Ity_I1,
-		   binop(Iop_CmpLT64U, addr, mkU64((ULong) stack_low)));
-    t1 = assignNew(sbOut, Ity_I64, unop(Iop_1Uto64, t1));
+		   binop(Iop_CmpLTwU, addr, mkUw((ULong) stack_low)));
+    t1 = assignNew(sbOut, Ity_Iw, unop(Iop_1Utow, t1));
     t2 = assignNew(sbOut, Ity_I1,
-		   binop(Iop_CmpLT64U, mkU64((ULong) stack_high), addr));
-    t2 = assignNew(sbOut, Ity_I64, unop(Iop_1Uto64, t2));
-    ta = assignNew(sbOut, Ity_I64, binop(Iop_Or64, t1, t2));
-    ta = assignNew(sbOut, Ity_I1, unop(Iop_64to1, ta));
+		   binop(Iop_CmpLTwU, mkUw((ULong) stack_high), addr));
+    t2 = assignNew(sbOut, Ity_Iw, unop(Iop_1Utow, t2));
+    ta = assignNew(sbOut, Ity_Iw, binop(Iop_Orw, t1, t2));
+    ta = assignNew(sbOut, Ity_I1, unop(Iop_wto1, ta));
     di = unsafeIRDirty_0_N(0, "jg_check_mem_access",
 			   VG_(fnptr_to_fnentry)(&jg_check_mem_access),
 			   mkIRExprVec_1(addr));
@@ -373,7 +399,7 @@ maybe_instrument_store(IRSB* sbOut, IRExpr* addr)
 {
     IRConst *c = (IRConst*)(addr);
     if (c->tag == Ico_U64) {
-	if (jg_can_access_mem((Addr) c->Ico.U64))
+	if (jg_can_access_mem((Addr) c->Ico.FIELD_Uw))
 	    /* known good address */;
 	else
 	    /* still need to check, it might be ok by then */
