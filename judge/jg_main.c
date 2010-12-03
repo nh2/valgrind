@@ -41,12 +41,7 @@
 #include "pub_tool_libcprint.h"
 #include "pub_tool_aspacemgr.h"
 
-static unsigned long long ins_count = 0;
-static unsigned long long ir_ins_count = 0;
-static unsigned long long syscall_count = 0;
-static unsigned long long mem_ins_count = 0;
 static unsigned long long reg_ins_count = 0;
-static unsigned long long cond_ins_count = 0;
 static Bool filter_syscalls = False;
 static int debug = 0;
 
@@ -316,13 +311,9 @@ static void jg_determine_stack (Addr base, SizeT len)
 }
 
 static VG_REGPARM(0)
-void log_instr(HWord client, HWord ir, HWord memop, HWord regop, HWord cond)
+void log_instr(HWord regop)
 {
-    ins_count += client;
-    ir_ins_count += ir;
-    mem_ins_count += memop;
     reg_ins_count += regop;
-    cond_ins_count += cond;
 }
 
 /* assign value to tmp */
@@ -404,10 +395,6 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
     IRSB* sbOut;
     IRStmt*    st;
     int i;
-    unsigned long long instr = 0;
-    unsigned long long ir_instr = 0;
-    unsigned long long mem_instr = 0;
-    unsigned long long cond_instr = 0;
     unsigned long long reg_instr = 0;
 
     if (gWordTy != hWordTy)
@@ -430,38 +417,23 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
 
 	st = sbIn->stmts[i];
 	tl_assert(isFlatIRStmt(st));
-	ir_instr++;
 
 	switch (st->tag) {
 	case Ist_Exit:
-	    cond_instr++;
 	    if (st->Ist.Exit.jk == Ijk_ClientReq)
 		VG_(tool_panic)("client requests not allowed (conditional)");
-	    di = unsafeIRDirty_0_N(0, "log_instr", VG_(fnptr_to_fnentry)(&log_instr),
-				   mkIRExprVec_5(mkIRExpr_HWord(instr),
-						 mkIRExpr_HWord(ir_instr),
-						 mkIRExpr_HWord(mem_instr),
-						 mkIRExpr_HWord(reg_instr),
-						 mkIRExpr_HWord(cond_instr)));
-	    addStmtToIRSB(sbOut, IRStmt_Dirty(di));
-	    instr = 0;
-	    ir_instr = 0;
-	    mem_instr = 0;
-	    reg_instr = 0;
-	    cond_instr = 0;
-	    break;
-	case Ist_IMark:
-	    instr++;
+	    if (reg_instr) {
+		di = unsafeIRDirty_0_N(0, "log_instr", VG_(fnptr_to_fnentry)(&log_instr),
+				       mkIRExprVec_1(mkIRExpr_HWord(reg_instr)));
+		addStmtToIRSB(sbOut, IRStmt_Dirty(di));
+		reg_instr = 0;
+	    }
 	    break;
 	case Ist_Store:
 	    maybe_instrument_store(sbOut, st->Ist.Store.addr);
-	    mem_instr++;
 	    break;
 	case Ist_WrTmp:
 	    switch (st->Ist.WrTmp.data->tag) {
-	    case Iex_Load:
-		mem_instr++;
-		break;
 	    case Iex_Get:
 	    case Iex_GetI:
 		reg_instr++;
@@ -476,12 +448,10 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
 	    break;
 	case Ist_CAS:
 	    maybe_instrument_store(sbOut, st->Ist.CAS.details->addr);
-	    mem_instr++;
 	    break;
 	case Ist_LLSC:
 	    if (st->Ist.LLSC.storedata) /* we don't care about LL */
 		maybe_instrument_store(sbOut, st->Ist.LLSC.addr);
-	    mem_instr++;
 	    break;
 	default:
 	    /* nada */
@@ -494,13 +464,9 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
     if (sbOut->jumpkind == Ijk_ClientReq)
 	VG_(tool_panic)("client requests not allowed (final)");
 
-    if (ir_instr || instr || mem_instr || reg_instr || cond_instr) {
+    if (reg_instr) {
 	di = unsafeIRDirty_0_N(0, "log_instr", VG_(fnptr_to_fnentry)(&log_instr),
-			       mkIRExprVec_5(mkIRExpr_HWord(instr),
-					     mkIRExpr_HWord(ir_instr),
-					     mkIRExpr_HWord(mem_instr),
-					     mkIRExpr_HWord(reg_instr),
-					     mkIRExpr_HWord(cond_instr)));
+			       mkIRExprVec_1(mkIRExpr_HWord(reg_instr)));
 	addStmtToIRSB(sbOut, IRStmt_Dirty(di));
     }
 
@@ -514,24 +480,26 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
     return sbOut;
 }
 
+/*
+ * Some statistics in R said that to estimate user+sys time on my i7
+ * 2.67GHz, we should use reg_ins_count*1.222e-10 (and no other
+ * factors play a significant role).
+ *
+ * Since that is still about as arbitrary as it gets, we simplify the
+ * score to a rough guess at the execution time in milliseconds, using
+ * a weight of 1e-10s = 1e-7ms per register access.
+ */
+const unsigned long long reg_ins_div = 10000000;
+
 static void jg_fini(Int exitcode)
 {
-    VG_(umsg)("%15llu instructions\n", ins_count);
-    VG_(umsg)("%15llu IR instructions\n", ir_ins_count);
-    VG_(umsg)("%15llu mem op instructions\n", mem_ins_count);
-    VG_(umsg)("%15llu register instructions\n", reg_ins_count);
-    VG_(umsg)("%15llu conditional instructions\n", cond_ins_count);
-    VG_(umsg)("%15llu syscalls\n", syscall_count);
-    VG_(umsg)("\nstats: %llu %llu %llu %llu %llu %llu\n", ins_count, ir_ins_count,
-	      mem_ins_count, reg_ins_count, cond_ins_count, syscall_count);
+    VG_(umsg)("score: %llu\n", reg_ins_count/reg_ins_div);
 }
 
 static void jg_pre_syscall (ThreadId tid, UInt syscallno,
 			    UWord* args, UInt nArgs)
 {
     int i;
-
-    syscall_count++;
 
     if (!filter_syscalls)
 	return;
