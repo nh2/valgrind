@@ -48,7 +48,11 @@ static int debug = 0;
 static Bool jg_process_cmd_line_option(Char* arg)
 {
     if (VG_BOOL_CLO(arg, "--filter-syscalls", filter_syscalls))
+#if defined(VGP_x86_linux) || defined(VGP_amd64_linux)
 	return True;
+#else
+	VG_(tool_panic)("syscall filtering not implemented on this platform, sorry");
+#endif
     if (VG_INT_CLO(arg, "--debug", debug))
 	return True;
     else
@@ -57,9 +61,11 @@ static Bool jg_process_cmd_line_option(Char* arg)
 
 static void jg_print_usage(void)
 {  
+#if defined(VGP_x86_linux) || defined(VGP_amd64_linux)
     VG_(printf)(
 		"    --filter-syscalls=no|yes  apply syscall whitelist filtering [no]\n"
 		);
+#endif
 }
 
 static void jg_print_debug_usage(void)
@@ -530,6 +536,7 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     if (!filter_syscalls)
 	return;
 
+#if defined(VGP_x86_linux) || defined(VGP_amd64_linux)
     switch(syscallno) {
     /* used by submissions in normal operation */
     case SYS_brk:
@@ -544,15 +551,16 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     case SYS_write:
     case SYS_access:
     case SYS_uname:
-#if __WORDSIZE != 64
+#if defined(VGP_x86_linux)
     case SYS_fstat64:
     case SYS_mmap2:
 #endif
     case SYS_fadvise64:
     /* process startup uses these for some reason */
-#if __WORDSIZE == 64
+#if defined(VGP_amd64_linux)
     case SYS_arch_prctl:
-#else
+#endif
+#if defined(VGP_x86_linux)
     case SYS_set_thread_area:
     case SYS_get_thread_area:
 #endif
@@ -572,7 +580,7 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     /* who knows, but harmless */
     case SYS_time:
     case SYS_getrlimit:
-#if __WORDSIZE != 64
+#if defined(VGP_x86_linux)
     case SYS_ugetrlimit:
 #endif
 	break; /* happy */
@@ -583,6 +591,7 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
 	VG_(tool_panic) ("forbidden system call intercepted.\n");
 	break;
     }
+#endif
 }
 
 static void jg_post_syscall (ThreadId tid, UInt syscallno,
