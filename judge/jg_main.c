@@ -42,11 +42,25 @@
 #include "pub_tool_aspacemgr.h"
 
 static unsigned long long reg_ins_count = 0;
+static unsigned long long reg_ins_limit = 0;
+
+/*
+ * Some statistics in R said that to estimate user+sys time on my i7
+ * 2.67GHz, we should use reg_ins_count*1.222e-10 (and no other
+ * factors play a significant role).
+ *
+ * Since that is still about as arbitrary as it gets, we simplify the
+ * score to a rough guess at the execution time in milliseconds, using
+ * a weight of 1e-10s = 1e-7ms per register access.
+ */
+const unsigned long long reg_ins_div = 10000000;
+
 static Bool filter_syscalls = False;
 static int debug = 0;
 
 static Bool jg_process_cmd_line_option(Char* arg)
 {
+    int score_limit;
     if (VG_BOOL_CLO(arg, "--filter-syscalls", filter_syscalls))
 #if defined(VGP_x86_linux) || defined(VGP_amd64_linux)
 	return True;
@@ -55,8 +69,11 @@ static Bool jg_process_cmd_line_option(Char* arg)
 #endif
     if (VG_INT_CLO(arg, "--debug", debug))
 	return True;
-    else
-	return False;
+    if (VG_INT_CLO(arg, "--score-limit", score_limit)) {
+	reg_ins_limit = score_limit * reg_ins_div;
+	return True;
+    }
+    return False;
 }
 
 static void jg_print_usage(void)
@@ -328,6 +345,8 @@ static VG_REGPARM(0)
 void log_instr(HWord regop)
 {
     reg_ins_count += regop;
+    if (reg_ins_limit && reg_ins_count > reg_ins_limit)
+	VG_(tool_panic)("score limit exceeded");
 }
 
 /* assign value to tmp */
@@ -511,17 +530,6 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
 
     return sbOut;
 }
-
-/*
- * Some statistics in R said that to estimate user+sys time on my i7
- * 2.67GHz, we should use reg_ins_count*1.222e-10 (and no other
- * factors play a significant role).
- *
- * Since that is still about as arbitrary as it gets, we simplify the
- * score to a rough guess at the execution time in milliseconds, using
- * a weight of 1e-10s = 1e-7ms per register access.
- */
-const unsigned long long reg_ins_div = 10000000;
 
 static void jg_fini(Int exitcode)
 {
