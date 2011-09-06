@@ -1057,6 +1057,7 @@ void main_process_cmd_line_options ( /*OUT*/Bool* logging_to_fd,
    if (tmp_log_fd >= 0) {
       // Move log_fd into the safe range, so it doesn't conflict with
       // any app fds.
+      int old_log_fd = tmp_log_fd;
       tmp_log_fd = VG_(fcntl)(tmp_log_fd, VKI_F_DUPFD, VG_(fd_hard_limit));
       if (tmp_log_fd < 0) {
          VG_(message)(Vg_UserMsg, "valgrind: failed to move logfile fd "
@@ -1064,6 +1065,8 @@ void main_process_cmd_line_options ( /*OUT*/Bool* logging_to_fd,
          VG_(log_output_sink).fd = 2;   // stderr
          VG_(log_output_sink).is_socket = False;
       } else {
+	 if (old_log_fd > 2)
+	    VG_(close)(old_log_fd);
          VG_(log_output_sink).fd = tmp_log_fd;
          VG_(fcntl)(VG_(log_output_sink).fd, VKI_F_SETFD, VKI_FD_CLOEXEC);
       }

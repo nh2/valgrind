@@ -40,6 +40,9 @@
 #include "pub_tool_options.h"
 #include "pub_tool_libcprint.h"
 #include "pub_tool_aspacemgr.h"
+#include "coregrind/pub_core_xarray.h"
+#include "coregrind/pub_core_libcprint.h"
+#include "coregrind/pub_core_clientstate.h"
 
 static unsigned long long reg_ins_count = 0;
 static unsigned long long reg_ins_limit = 0;
@@ -536,11 +539,19 @@ static void jg_fini(Int exitcode)
     VG_(umsg)("score: %llu\n", reg_ins_count/reg_ins_div);
 }
 
-static void jg_pre_syscall (ThreadId tid, UInt syscallno,
-			    UWord* args, UInt nArgs)
+static void jg_syscall_forbidden (UInt syscallno, UWord *args, UInt nArgs)
 {
     int i;
 
+    VG_(printf) ("System call %d intercepted, args:\n", (int) syscallno);
+    for (i = 0; i < nArgs; i++)
+	VG_(printf) ("  0x%010llx = %lld\n", (long long) args[i], (long long) args[i]);
+    VG_(tool_panic) ("forbidden system call intercepted.\n");
+}
+
+static void jg_pre_syscall (ThreadId tid, UInt syscallno,
+			    UWord* args, UInt nArgs)
+{
     if (!filter_syscalls)
 	return;
 
@@ -550,18 +561,14 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     case SYS_brk:
     case SYS_exit_group:
     case SYS_fstat:
-    case SYS_mmap:
     case SYS_mprotect:
     case SYS_mremap:
     case SYS_munmap:
     case SYS_open: /* note, no close or dup */
-    case SYS_read:
-    case SYS_write:
     case SYS_access:
     case SYS_uname:
 #if defined(VGP_x86_linux)
     case SYS_fstat64:
-    case SYS_mmap2:
 #endif
     case SYS_fadvise64:
     /* process startup uses these for some reason */
@@ -577,8 +584,6 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     case SYS_set_tid_address:
     case SYS_set_robust_list:
     /* used during assert() backtrace printing */
-    case SYS_writev:
-    case SYS_readv:
     case SYS_kill:
     case SYS_tkill:
     case SYS_tgkill:
@@ -592,11 +597,22 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     case SYS_ugetrlimit:
 #endif
 	break; /* happy */
+    case SYS_write:
+    case SYS_writev:
+    case SYS_readv:
+    case SYS_read:
+	if ((int) args[0] >= VG_(fd_hard_limit))
+	    jg_syscall_forbidden(syscallno, args, nArgs);
+	break;
+    case SYS_mmap:
+#if defined(VGP_x86_linux)
+    case SYS_mmap2:
+#endif
+	if ((int) args[4] >= VG_(fd_hard_limit))
+	    jg_syscall_forbidden(syscallno, args, nArgs);
+	break;
     default:
-	VG_(printf) ("System call %d intercepted, args:\n", (int) syscallno);
-	for (i = 0; i < nArgs; i++)
-	    VG_(printf) ("  0x%010llx = %lld\n", (long long) args[i], (long long) args[i]);
-	VG_(tool_panic) ("forbidden system call intercepted.\n");
+	jg_syscall_forbidden(syscallno, args, nArgs);
 	break;
     }
 #endif
