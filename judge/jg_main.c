@@ -230,9 +230,6 @@ static void jg_set_mem_one (Addr base, Bool accessible)
 	CLR_BIT(main_ent[SUB_MAP_ENT(base)], BITS_ENT(base));
 }
 
-void VG_(discard_translations) ( Addr64 guest_start, ULong range,
-                                 HChar* who );
-
 static void jg_die_mem (Addr base, SizeT len)
 {
     if (debug > 1) {
@@ -246,7 +243,6 @@ static void jg_die_mem (Addr base, SizeT len)
 	jg_set_mem_one(a, 0);
 	a += PAGE_SIZE;
     }
-    VG_(discard_translations)(0, 0xffffffffffff, "jg_die_mem");
 }
 
 static void jg_new_mem (Addr base, SizeT len)
@@ -422,21 +418,6 @@ instrument_store(IRSB* sbOut, IRExpr* addr)
     addStmtToIRSB(sbOut, IRStmt_Dirty(di));
 }
 
-static void
-maybe_instrument_store(IRSB* sbOut, IRExpr* addr)
-{
-    IRConst *c = (IRConst*)(addr);
-    if (c->tag == Ico_U64) {
-	if (jg_can_access_mem((Addr) c->Ico.FIELD_Uw))
-	    /* known good address */;
-	else
-	    /* still need to check, it might be ok by then */
-	    instrument_store(sbOut, addr);
-    } else {
-	instrument_store(sbOut, addr);
-    }
-}
-
 static
 IRSB* jg_instrument (VgCallbackClosure* closure,
 		     IRSB* sbIn,
@@ -484,7 +465,7 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
 	    }
 	    break;
 	case Ist_Store:
-	    maybe_instrument_store(sbOut, st->Ist.Store.addr);
+	    instrument_store(sbOut, st->Ist.Store.addr);
 	    break;
 	case Ist_WrTmp:
 	    switch (st->Ist.WrTmp.data->tag) {
@@ -501,11 +482,11 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
 	    reg_instr++;
 	    break;
 	case Ist_CAS:
-	    maybe_instrument_store(sbOut, st->Ist.CAS.details->addr);
+	    instrument_store(sbOut, st->Ist.CAS.details->addr);
 	    break;
 	case Ist_LLSC:
 	    if (st->Ist.LLSC.storedata) /* we don't care about LL */
-		maybe_instrument_store(sbOut, st->Ist.LLSC.addr);
+		instrument_store(sbOut, st->Ist.LLSC.addr);
 	    break;
 	default:
 	    /* nada */
