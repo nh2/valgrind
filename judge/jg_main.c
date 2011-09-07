@@ -40,12 +40,31 @@
 #include "pub_tool_options.h"
 #include "pub_tool_libcprint.h"
 #include "pub_tool_aspacemgr.h"
+#include "coregrind/pub_core_basics.h"
+#include "coregrind/pub_core_libcassert.h"
 #include "coregrind/pub_core_xarray.h"
 #include "coregrind/pub_core_libcprint.h"
 #include "coregrind/pub_core_clientstate.h"
+#include "coregrind/pub_core_tooliface.h"
 
 static unsigned long long reg_ins_count = 0;
 static unsigned long long reg_ins_limit = 0;
+
+__attribute__ ((noreturn))
+static void jg_abort (Char* str)
+{
+    VG_(umsg)("%s\n", str);
+    VG_(show_sched_status)();
+    VG_(printf)(
+		"\n"
+		"Note: usually your program did something forbidden.\n"
+		"If you think it's our fault, please report this to: %s\n\n"
+		"In the bug report, send all the above text, your source code,\n"
+		"the valgrind version, and what OS and version you are using.\n"
+		"Thanks.\n\n",
+		VG_(details).bug_reports_to);
+    VG_(exit)(1);
+}
 
 /*
  * Some statistics in R said that to estimate user+sys time on my i7
@@ -148,7 +167,7 @@ void die_with_bad_access (Addr a);
 void die_with_bad_access (Addr a)
 {
     VG_(printf)("invalid mem access: %p\n", (void *) a);
-    VG_(tool_panic)("user tried invalid address");
+    jg_abort("user tried invalid address");
 }
 
 Addr stack_low = 0;
@@ -345,7 +364,7 @@ void log_instr(HWord regop)
 {
     reg_ins_count += regop;
     if (reg_ins_limit && reg_ins_count > reg_ins_limit)
-	VG_(tool_panic)("score limit exceeded");
+	jg_abort("score limit exceeded");
 }
 
 /* assign value to tmp */
@@ -456,7 +475,7 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
 	switch (st->tag) {
 	case Ist_Exit:
 	    if (st->Ist.Exit.jk == Ijk_ClientReq)
-		VG_(tool_panic)("client requests not allowed (conditional)");
+		jg_abort("client requests not allowed (conditional)");
 	    if (reg_instr) {
 		di = unsafeIRDirty_0_N(0, "log_instr", VG_(fnptr_to_fnentry)(&log_instr),
 				       mkIRExprVec_1(mkIRExpr_HWord(reg_instr)));
@@ -497,7 +516,7 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
     }
 
     if (sbOut->jumpkind == Ijk_ClientReq)
-	VG_(tool_panic)("client requests not allowed (final)");
+	jg_abort("client requests not allowed (final)");
 
     if (reg_instr) {
 	di = unsafeIRDirty_0_N(0, "log_instr", VG_(fnptr_to_fnentry)(&log_instr),
@@ -527,7 +546,7 @@ static void jg_syscall_forbidden (UInt syscallno, UWord *args, UInt nArgs)
     VG_(printf) ("System call %d intercepted, args:\n", (int) syscallno);
     for (i = 0; i < nArgs; i++)
 	VG_(printf) ("  0x%010llx = %lld\n", (long long) args[i], (long long) args[i]);
-    VG_(tool_panic) ("forbidden system call intercepted.\n");
+    jg_abort ("forbidden system call intercepted.\n");
 }
 
 static void jg_pre_syscall (ThreadId tid, UInt syscallno,
