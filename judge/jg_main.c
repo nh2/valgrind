@@ -564,7 +564,7 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     case SYS_mprotect:
     case SYS_mremap:
     case SYS_munmap:
-    case SYS_open: /* note, no close or dup */
+    case SYS_open:
     case SYS_access:
     case SYS_uname:
 #if defined(VGP_x86_linux)
@@ -601,6 +601,7 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
     case SYS_writev:
     case SYS_readv:
     case SYS_read:
+    case SYS_close:
 	if ((int) args[0] >= VG_(fd_hard_limit))
 	    jg_syscall_forbidden(syscallno, args, nArgs);
 	break;
