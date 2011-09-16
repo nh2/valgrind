@@ -138,6 +138,7 @@ static void usage_NORETURN ( Bool debug_help )
 "    --log-fd=<number>         log messages to file descriptor [2=stderr]\n"
 "    --log-file=<file>         log messages to <file>\n"
 "    --log-socket=ipaddr:port  log messages to socket ipaddr:port\n"
+"    --close-log-fd=no|yes     close log fd after dup [no]\n"
 "\n"
 "  user options for Valgrind tools that report errors:\n"
 "    --xml=yes                 emit error output in XML (some tools only)\n"
@@ -419,6 +420,7 @@ void main_process_cmd_line_options ( /*OUT*/Bool* logging_to_fd,
    // ok.  So we have tmp_log_fd to hold the tmp fd prior to that point.
    SysRes sres;
    Int    i, tmp_log_fd, tmp_xml_fd;
+   Bool   close_log_fd = 0;
    Int    toolname_len = VG_(strlen)(toolname);
    const HChar* tmp_str;         // Used in a couple of places.
    enum {
@@ -657,6 +659,7 @@ void main_process_cmd_line_options ( /*OUT*/Bool* logging_to_fd,
          log_to = VgLogTo_Fd;
          log_fsname_unexpanded = NULL;
       }
+      else if VG_BOOL_CLO(arg, "--close-log-fd", close_log_fd) {}
       else if VG_INT_CLO(arg, "--xml-fd", tmp_xml_fd) {
          xml_to = VgLogTo_Fd;
          xml_fsname_unexpanded = NULL;
@@ -1065,7 +1068,7 @@ void main_process_cmd_line_options ( /*OUT*/Bool* logging_to_fd,
          VG_(log_output_sink).fd = 2;   // stderr
          VG_(log_output_sink).is_socket = False;
       } else {
-	 if (old_log_fd > 2)
+	 if (close_log_fd && old_log_fd > 2)
 	    VG_(close)(old_log_fd);
          VG_(log_output_sink).fd = tmp_log_fd;
          VG_(fcntl)(VG_(log_output_sink).fd, VKI_F_SETFD, VKI_FD_CLOEXEC);
