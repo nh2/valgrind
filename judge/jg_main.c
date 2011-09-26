@@ -363,8 +363,10 @@ static VG_REGPARM(0)
 void log_instr(HWord regop)
 {
     reg_ins_count += regop;
-    if (reg_ins_limit && reg_ins_count > reg_ins_limit)
+    if (reg_ins_limit && reg_ins_count > reg_ins_limit) {
+	VG_(umsg)("score: %llu\n", reg_ins_count/reg_ins_div);
 	jg_abort("score limit exceeded");
+    }
 }
 
 /* assign value to tmp */
