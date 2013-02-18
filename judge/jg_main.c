@@ -544,9 +544,14 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
     return sbOut;
 }
 
-static void jg_fini(Int exitcode)
+static void jg_print_score(void)
 {
     VG_(umsg)("score: %llu\n", reg_ins_count/reg_ins_div);
+}
+
+static void jg_fini(Int exitcode)
+{
+    jg_print_score();
 }
 
 static void jg_syscall_forbidden (UInt syscallno, UWord *args, UInt nArgs)
@@ -636,12 +641,15 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
 	if (filter_syscalls == FILTER_SYSCALLS_PARANOID)
 	    jg_syscall_forbidden(syscallno, args, nArgs);
 	break;
+    case SYS_execve:
+        /* sadly needed, but we can still print the score for later summing up */
+        jg_print_score();
+	break;
     case SYS_clock_getres:
     case SYS_clock_gettime:
     case SYS_clock_settime:
     case SYS_dup:
     case SYS_dup2:
-    case SYS_execve:
     case SYS_exit:
     case SYS_fcntl:
 #if defined(VGP_x86_linux)
