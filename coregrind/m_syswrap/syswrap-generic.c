@@ -2682,6 +2682,15 @@ PRE(sys_execve)
    if (!trace_this_child) {
       argv = (HChar**)ARG2;
    } else {
+      int log_fd = -1;
+      HChar *log_fd_arg;
+      if (VG_(log_output_sink).fd > 0) {
+	// Move the log fd back into the low-numbered range, inherit it
+	// to the child, and pass it a --log-fd flag.
+	log_fd = VG_(fcntl)(VG_(log_output_sink).fd, VKI_F_DUPFD, 3);
+	if (log_fd < 0)
+	  goto hosed;
+      }
       vg_assert( VG_(args_for_valgrind) );
       vg_assert( VG_(args_for_valgrind_noexecpass) >= 0 );
       vg_assert( VG_(args_for_valgrind_noexecpass) 
@@ -2692,6 +2701,9 @@ PRE(sys_execve)
       // V's args
       tot_args += VG_(sizeXA)( VG_(args_for_valgrind) );
       tot_args -= VG_(args_for_valgrind_noexecpass);
+      // --log-fd
+      if (log_fd >= 0)
+	tot_args++;
       // name of client exe
       tot_args++;
       // args for client exe, skipping [0]
@@ -2711,6 +2723,13 @@ PRE(sys_execve)
          if (i < VG_(args_for_valgrind_noexecpass))
             continue;
          argv[j++] = * (HChar**) VG_(indexXA)( VG_(args_for_valgrind), i );
+      }
+      if (log_fd >= 0) {
+         // build --log-fd arg
+         log_fd_arg = VG_(malloc)( "di.syswrap.pre_sys_execve.2", 14 ); // --log-fd=XXXX
+         if (log_fd_arg == 0) goto hosed;
+         VG_(sprintf)(log_fd_arg, "--log-fd=%d", log_fd);
+         argv[j++] = log_fd_arg;
       }
       argv[j++] = (HChar*)ARG1;
       if (arg2copy && arg2copy[0])
