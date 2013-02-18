@@ -77,21 +77,29 @@ static void jg_abort (Char* str)
  */
 const unsigned long long reg_ins_div = 10000000;
 
-static Bool filter_syscalls = False;
+static enum {
+	FILTER_SYSCALLS_OFF = 0,
+	FILTER_SYSCALLS_PARANOID,
+	FILTER_SYSCALLS_JAVA,
+	FILTER_SYSCALLS_DEBUG = 255
+} filter_syscalls;
+
 static int debug = 0;
 
 static Bool jg_process_cmd_line_option(Char* arg)
 {
     int score_limit;
-    if (VG_BOOL_CLO(arg, "--filter-syscalls", filter_syscalls))
-#if defined(VGP_x86_linux) || defined(VGP_amd64_linux)
+    if VG_XACT_CLO(arg, "--filter-syscalls=no", filter_syscalls, FILTER_SYSCALLS_OFF)
 	return True;
-#else
-	VG_(tool_panic)("syscall filtering not implemented on this platform, sorry");
-#endif
-    if (VG_INT_CLO(arg, "--debug", debug))
+    else if VG_XACT_CLO(arg, "--filter-syscalls=yes", filter_syscalls, FILTER_SYSCALLS_PARANOID)
 	return True;
-    if (VG_INT_CLO(arg, "--score-limit", score_limit)) {
+    else if VG_XACT_CLO(arg, "--filter-syscalls=java", filter_syscalls, FILTER_SYSCALLS_JAVA)
+	return True;
+    else if VG_XACT_CLO(arg, "--filter-syscalls=debug", filter_syscalls, FILTER_SYSCALLS_DEBUG)
+	return True;
+    else if (VG_INT_CLO(arg, "--debug", debug))
+	return True;
+    else if (VG_INT_CLO(arg, "--score-limit", score_limit)) {
 	reg_ins_limit = score_limit * reg_ins_div;
 	return True;
     }
@@ -102,7 +110,7 @@ static void jg_print_usage(void)
 {  
 #if defined(VGP_x86_linux) || defined(VGP_amd64_linux)
     VG_(printf)(
-		"    --filter-syscalls=no|yes  apply syscall whitelist filtering [no]\n"
+		"    --filter-syscalls=no|yes|java|debug  apply syscall whitelist filtering [no]\n"
 		);
 #endif
 }
@@ -554,8 +562,13 @@ static void jg_syscall_forbidden (UInt syscallno, UWord *args, UInt nArgs)
 static void jg_pre_syscall (ThreadId tid, UInt syscallno,
 			    UWord* args, UInt nArgs)
 {
-    if (!filter_syscalls)
+    if (filter_syscalls == FILTER_SYSCALLS_OFF)
 	return;
+
+    if (filter_syscalls == FILTER_SYSCALLS_DEBUG) {
+	VG_(printf) ("debug: syscall %d\n", (int) syscallno);
+	return;
+    }
 
 #if defined(VGP_x86_linux) || defined(VGP_amd64_linux)
     switch(syscallno) {
@@ -613,6 +626,89 @@ static void jg_pre_syscall (ThreadId tid, UInt syscallno,
 #endif
 	if ((int) args[4] >= VG_(fd_hard_limit))
 	    jg_syscall_forbidden(syscallno, args, nArgs);
+	break;
+    /* java wants more powers */
+    case SYS_clone:
+        /* note that for clone(2) the flags are pos 2, but for the
+           underlying syscall they are pos 0 */
+        if (!((int) args[0] & 0x00010000)) /* CLONE_THREAD not set? */
+	    jg_syscall_forbidden(syscallno, args, nArgs);
+	if (filter_syscalls == FILTER_SYSCALLS_PARANOID)
+	    jg_syscall_forbidden(syscallno, args, nArgs);
+	break;
+    case SYS_clock_getres:
+    case SYS_clock_gettime:
+    case SYS_clock_settime:
+    case SYS_dup:
+    case SYS_dup2:
+    case SYS_execve:
+    case SYS_exit:
+    case SYS_fcntl:
+#if defined(VGP_x86_linux)
+    case SYS_fcntl64:
+#endif
+    case SYS_ftruncate:
+    case SYS_getcwd:
+    case SYS_getdents:
+    case SYS_getdents64:
+    case SYS_getegid:
+    case SYS_geteuid:
+    case SYS_getgid:
+    case SYS_get_mempolicy:
+    case SYS_getpid:
+    case SYS_gettimeofday:
+    case SYS_getuid:
+#if defined(VGP_x86_linux)
+    case SYS_getegid32:
+    case SYS_geteuid32:
+    case SYS_getgid32:
+    case SYS_getuid32:
+#endif
+#if defined(VGP_x86_linux)
+    case SYS__llseek:
+#endif
+    case SYS_lseek:
+    case SYS_lstat:
+#if defined(VGP_x86_linux)
+    case SYS_lstat64:
+#endif
+    case SYS_madvise:
+    case SYS_mkdir:
+    case SYS_nanosleep:
+    case SYS_poll:
+    case SYS_prctl:
+    case SYS_readlink:
+    case SYS_rt_sigreturn:
+    case SYS_getpriority:
+    case SYS_setpriority:
+    case SYS_sched_setparam:
+    case SYS_sched_getparam:
+    case SYS_sched_setscheduler:
+    case SYS_sched_getscheduler:
+    case SYS_sched_get_priority_max:
+    case SYS_sched_get_priority_min:
+    case SYS_sched_rr_get_interval:
+    case SYS_sched_getaffinity:
+    case SYS_sched_yield:
+    case SYS_setrlimit:
+    case SYS_stat:
+#if defined(VGP_x86_linux)
+    case SYS_stat64:
+#endif
+    case SYS_truncate:
+    case SYS_unlink:
+	if (filter_syscalls == FILTER_SYSCALLS_PARANOID)
+	    jg_syscall_forbidden(syscallno, args, nArgs);
+	break;
+    case SYS_ioctl:
+	if (filter_syscalls == FILTER_SYSCALLS_PARANOID)
+	    jg_syscall_forbidden(syscallno, args, nArgs);
+	if ((int) args[0] == 0 && (int) args[1] == 0x541b /* FIONREAD */) {
+	    /* ioctl(0,FIONREAD,p) is ok as long as p is addressable */
+	    jg_check_mem_access((void*) args[2]);
+	    break;
+	}
+	jg_syscall_forbidden(syscallno, args, nArgs);
 	break;
     default:
 	jg_syscall_forbidden(syscallno, args, nArgs);
