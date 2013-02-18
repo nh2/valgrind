@@ -755,7 +755,8 @@ static void jg_pre_clo_init(void)
     VG_(track_change_mem_mprotect) (jg_new_mem_w_flags);
     VG_(track_copy_mem_remap)      (jg_copy_mem);
 
-    VG_(track_die_mem_stack_signal)(jg_die_mem);
+    /* This doesn't work with Java, which apparently relies on invalid accesses */
+    //VG_(track_die_mem_stack_signal)(jg_die_mem);
     VG_(track_die_mem_brk)         (jg_die_mem);
     VG_(track_die_mem_munmap)      (jg_die_mem);
 
