@@ -47,4 +47,39 @@ judge_@VGCONF_ARCH_SEC@_@VGCONF_OS@_LINK = \
 	$(judge_@VGCONF_ARCH_SEC@_@VGCONF_OS@_LDFLAGS)
 endif
 
+#----------------------------------------------------------------------------
+# vgpreload_judge-<platform>.so
+#----------------------------------------------------------------------------
 
+noinst_PROGRAMS += vgpreload_judge-@VGCONF_ARCH_PRI@-@VGCONF_OS@.so
+if VGCONF_HAVE_PLATFORM_SEC
+noinst_PROGRAMS += vgpreload_judge-@VGCONF_ARCH_SEC@-@VGCONF_OS@.so
+endif
+
+if VGCONF_OS_IS_DARWIN
+noinst_DSYMS = $(noinst_PROGRAMS)
+endif
+
+VGPRELOAD_JUDGE_SOURCES_COMMON = jg_replace.c
+
+vgpreload_judge_@VGCONF_ARCH_PRI@_@VGCONF_OS@_so_SOURCES      = \
+	$(VGPRELOAD_JUDGE_SOURCES_COMMON)
+vgpreload_judge_@VGCONF_ARCH_PRI@_@VGCONF_OS@_so_CPPFLAGS     = \
+	$(AM_CPPFLAGS_@VGCONF_PLATFORM_PRI_CAPS@)
+vgpreload_judge_@VGCONF_ARCH_PRI@_@VGCONF_OS@_so_CFLAGS       = \
+	$(AM_CFLAGS_@VGCONF_PLATFORM_PRI_CAPS@) $(AM_CFLAGS_PIC) -O2
+vgpreload_judge_@VGCONF_ARCH_PRI@_@VGCONF_OS@_so_LDFLAGS      = \
+	$(PRELOAD_LDFLAGS_@VGCONF_PLATFORM_PRI_CAPS@)
+
+if VGCONF_HAVE_PLATFORM_SEC
+vgpreload_judge_@VGCONF_ARCH_SEC@_@VGCONF_OS@_so_SOURCES      = \
+	$(VGPRELOAD_JUDGE_SOURCES_COMMON)
+vgpreload_judge_@VGCONF_ARCH_SEC@_@VGCONF_OS@_so_CPPFLAGS     = \
+	$(AM_CPPFLAGS_@VGCONF_PLATFORM_SEC_CAPS@)
+vgpreload_judge_@VGCONF_ARCH_SEC@_@VGCONF_OS@_so_CFLAGS       = \
+	$(AM_CFLAGS_@VGCONF_PLATFORM_SEC_CAPS@) $(AM_CFLAGS_PIC) -O2
+vgpreload_judge_@VGCONF_ARCH_SEC@_@VGCONF_OS@_so_LDFLAGS      = \
+	$(PRELOAD_LDFLAGS_@VGCONF_PLATFORM_SEC_CAPS@)
+endif
+
+jg_replace.o: CFLAGS += -fno-omit-frame-pointer
