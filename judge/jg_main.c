@@ -73,9 +73,13 @@ static void jg_abort (Char* str)
  *
  * Since that is still about as arbitrary as it gets, we simplify the
  * score to a rough guess at the execution time in milliseconds, using
- * a weight of 1e-10s = 1e-7ms per register access.
+ * a weight of 1.1e-10s = 1.1e-7ms per register access.
+ *
+ * (Changed by 10% so as to account for the change that now counts
+ * each jump, too.  This compensates for the about 10% apparent
+ * slowdown caused by counting jumps.)
  */
-const unsigned long long reg_ins_div = 10000000;
+const unsigned long long reg_ins_div = 11000000;
 
 static enum {
 	FILTER_SYSCALLS_OFF = 0,
@@ -459,7 +463,9 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
     IRSB* sbOut;
     IRStmt*    st;
     int i;
-    unsigned long long reg_instr = 0;
+    /* We always increment by at least 1 at every jump.  This
+     * guarantees that endless loops hit the time limit. */
+    unsigned long long reg_instr = 1;
 
     if (gWordTy != hWordTy)
 	VG_(tool_panic)("host/guest word size mismatch");
@@ -490,7 +496,7 @@ IRSB* jg_instrument (VgCallbackClosure* closure,
 		di = unsafeIRDirty_0_N(0, "log_instr", VG_(fnptr_to_fnentry)(&log_instr),
 				       mkIRExprVec_1(mkIRExpr_HWord(reg_instr)));
 		addStmtToIRSB(sbOut, IRStmt_Dirty(di));
-		reg_instr = 0;
+		reg_instr = 1;
 	    }
 	    break;
 	case Ist_Store:
