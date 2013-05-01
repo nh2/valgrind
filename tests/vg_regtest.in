@@ -151,6 +151,7 @@ my $prereq;             # prerequisite test to satisfy before running test
 my $post;               # check command after running test
 my $cleanup;            # cleanup command to run
 
+my @testqueue;          # List of tests to run
 my @failures;           # List of failed tests
 
 my $num_tests_done      = 0;
@@ -191,10 +192,17 @@ sub validate_program ($$$$)
 {
     my ($dir, $prog, $must_exist, $must_be_executable) = @_;
 
+    my $dir_is_abs = ($dir =~ /^\//);
     # If absolute path, leave it alone.  If relative, make it
     # absolute -- by prepending current dir -- so we can change
     # dirs and still use it.
-    $prog = "$dir/$prog" if ($prog !~ /^\//);
+    my $invoke;
+    if ($prog !~ /^\//) {
+	$invoke = "./$prog";
+	$prog = "$dir/$prog";
+    } else {
+	$invoke = $prog;
+    }
     if ($must_exist) {
         (-f $prog) or die "vg_regtest: `$prog' not found or not a file ($dir)\n";
     }
@@ -202,7 +210,7 @@ sub validate_program ($$$$)
         (-x $prog) or die "vg_regtest: `$prog' not executable ($dir)\n";
     }
 
-    return $prog;
+    return $dir_is_abs ? $prog : $invoke;
 }
 
 sub process_command_line() 
@@ -265,9 +273,9 @@ sub process_command_line()
 #----------------------------------------------------------------------------
 # Read a .vgtest file
 #----------------------------------------------------------------------------
-sub read_vgtest_file($)
+sub read_vgtest_file($$)
 {
-    my ($f) = @_;
+    my ($dir, $f) = @_;
 
     # Defaults.
     ($vgopts, $prog, $args)            = ("", undef, "");
@@ -279,8 +287,8 @@ sub read_vgtest_file($)
     ($stdoutB_filter_args, $stderrB_filter_args) = (undef, undef);
 
     # Every test directory must have a "filter_stderr"
-    $stderr_filter = validate_program(".", $default_stderr_filter, 1, 1);
-    $stderrB_filter = validate_program(".", $default_stderr_filter, 1, 1);
+    $stderr_filter = validate_program($dir, $default_stderr_filter, 1, 1);
+    $stderrB_filter = validate_program($dir, $default_stderr_filter, 1, 1);
     
 
     open(INPUTFILE, "< $f") || die "File $f not openable\n";
@@ -293,27 +301,27 @@ sub read_vgtest_file($)
             $addvgopts =~ s/\${PWD}/$ENV{PWD}/g;
             $vgopts = $vgopts . " " . $addvgopts;   # Nb: Make sure there's a space!
         } elsif ($line =~ /^\s*prog:\s*(.*)$/) {
-            $prog = validate_program(".", $1, 0, 0);
+            $prog = validate_program($dir, $1, 0, 0);
         } elsif ($line =~ /^\s*args:\s*(.*)$/) {
             $args = $1;
         } elsif ($line =~ /^\s*stdout_filter:\s*(.*)$/) {
-            $stdout_filter = validate_program(".", $1, 1, 1);
+            $stdout_filter = validate_program($dir, $1, 1, 1);
         } elsif ($line =~ /^\s*stderr_filter:\s*(.*)$/) {
-            $stderr_filter = validate_program(".", $1, 1, 1);
+            $stderr_filter = validate_program($dir, $1, 1, 1);
         } elsif ($line =~ /^\s*stdout_filter_args:\s*(.*)$/) {
             $stdout_filter_args = $1;
         } elsif ($line =~ /^\s*stderr_filter_args:\s*(.*)$/) {
             $stderr_filter_args = $1;
         } elsif ($line =~ /^\s*progB:\s*(.*)$/) {
-            $progB = validate_program(".", $1, 0, 0);
+            $progB = validate_program($dir, $1, 0, 0);
         } elsif ($line =~ /^\s*argsB:\s*(.*)$/) {
             $argsB = $1;
         } elsif ($line =~ /^\s*stdinB:\s*(.*)$/) {
             $stdinB = $1;
         } elsif ($line =~ /^\s*stdoutB_filter:\s*(.*)$/) {
-            $stdoutB_filter = validate_program(".", $1, 1, 1);
+            $stdoutB_filter = validate_program($dir, $1, 1, 1);
         } elsif ($line =~ /^\s*stderrB_filter:\s*(.*)$/) {
-            $stderrB_filter = validate_program(".", $1, 1, 1);
+            $stderrB_filter = validate_program($dir, $1, 1, 1);
         } elsif ($line =~ /^\s*stdoutB_filter_args:\s*(.*)$/) {
             $stdoutB_filter_args = $1;
         } elsif ($line =~ /^\s*stderrB_filter_args:\s*(.*)$/) {
@@ -359,9 +367,10 @@ sub filtered_rename($$)
 
 
 # from a directory name like "/foo/cachesim/tests/" determine the tool name
-sub determine_tool()
+sub determine_tool($)
 {
-    my $dir = `pwd`;
+    my $subdir = $_[0];
+    my $dir = `pwd` . "/$subdir";
     $dir =~ /.*\/([^\/]+)\/tests.*/;   # foo/tool_name/tests/foo
     return $1;
 }
@@ -416,10 +425,13 @@ sub do_one_test($$)
     my $maybe_extraopts = $ENV{"EXTRA_REGTEST_OPTS"};
     my $extraopts = $maybe_extraopts ?  $maybe_extraopts  : "";
 
-    read_vgtest_file($vgtest);
+    my $tmp = $tmp_prefix;
+    my $tmp_fullpath = "$dir/$tmp";
+
+    read_vgtest_file("$dir", "$dir/$vgtest");
 
     if (defined $prereq) {
-        my $prereq_res = system("$prereq");
+        my $prereq_res = system("cd $dir; $prereq");
         if (0 == $prereq_res) {
             # Do nothing (ie. continue with the test)
         } elsif (256 == $prereq_res) {
@@ -443,11 +455,11 @@ sub do_one_test($$)
         # Note: redirection of stdout and stderr is before $progB to allow argsB
         # to e.g. redirect stdoutB to stderrB
         if (defined $stdinB) {
-            mysystem("(rm -f progB.done;"
+            mysystem("(cd $dir; rm -f progB.done;"
                      . " < $stdinB > $name.stdoutB.out 2> $name.stderrB.out $progB $argsB;"
                      . "touch progB.done) &");
         } else {
-            mysystem("(rm -f progB.done;"
+            mysystem("(cd $dir; rm -f progB.done;"
                      . " > $name.stdoutB.out 2> $name.stderrB.out $progB $argsB;"
                      . "touch progB.done)  &");
         }
@@ -457,10 +469,11 @@ sub do_one_test($$)
  
     # Pass the appropriate --tool option for the directory (can be overridden
     # by an "args:" line, though).
-    my $tool=determine_tool();
+    my $tool=determine_tool($dir);
     if (defined $outer_valgrind ) {
         # in an outer-inner setup, only set VALGRIND_LIB_INNER
-        mysystem(   "VALGRIND_LIB_INNER=$valgrind_lib "
+        mysystem(   "cd $dir; "
+		  . "VALGRIND_LIB_INNER=$valgrind_lib "
                   . "$outer_valgrind "
                   . "--tool=" . $outer_tool . " "
                   . "$outer_args "
@@ -472,7 +485,8 @@ sub do_one_test($$)
     } else {
         # Set both VALGRIND_LIB and VALGRIND_LIB_INNER in case this Valgrind
         # was configured with --enable-inner.
-        mysystem(   "VALGRIND_LIB=$valgrind_lib VALGRIND_LIB_INNER=$valgrind_lib "
+        mysystem(   "cd $dir; "
+		  . "VALGRIND_LIB=$valgrind_lib VALGRIND_LIB_INNER=$valgrind_lib "
                   . "$valgrind --command-line-only=yes --memcheck:leak-check=no "
                   . "--tool=$tool $extraopts $vgopts "
                   . "$prog $args > $name.stdout.out 2> $name.stderr.out");
@@ -481,22 +495,22 @@ sub do_one_test($$)
     # Filter stdout
     if (defined $stdout_filter) {
         $stdout_filter_args = $name if (! defined $stdout_filter_args);
-        mysystem("$stdout_filter $stdout_filter_args < $name.stdout.out > $tmp");
-        filtered_rename($tmp, "$name.stdout.out");
+        mysystem("cd $dir; $stdout_filter $stdout_filter_args < $name.stdout.out > $tmp");
+        filtered_rename($tmp_fullpath, "$fullname.stdout.out");
     }
     # Find all the .stdout.exp files.  If none, use /dev/null.
-    my @stdout_exps = <$name.stdout.exp*>;
+    my @stdout_exps = <$fullname.stdout.exp*>;
     @stdout_exps = ( "/dev/null" ) if (0 == scalar @stdout_exps);
-    do_diffs($fullname, $name, "stdout", \@stdout_exps); 
+    do_diffs($fullname, $fullname, "stdout", \@stdout_exps);
 
     # Filter stderr
     $stderr_filter_args = $name if (! defined $stderr_filter_args);
-    mysystem("$stderr_filter $stderr_filter_args < $name.stderr.out > $tmp");
-    filtered_rename($tmp, "$name.stderr.out");
+    mysystem("cd $dir; $stderr_filter $stderr_filter_args < $name.stderr.out > $tmp");
+    filtered_rename($tmp_fullpath, "$fullname.stderr.out");
     # Find all the .stderr.exp files.  At least one must exist.
-    my @stderr_exps = <$name.stderr.exp*>;
+    my @stderr_exps = <$fullname.stderr.exp*>;
     (0 != scalar @stderr_exps) or die "Could not find `$name.stderr.exp*'\n";
-    do_diffs($fullname, $name, "stderr", \@stderr_exps); 
+    do_diffs($fullname, $fullname, "stderr", \@stderr_exps);
 
     if (defined $progB) {
         # wait for the child to be finished
@@ -509,44 +523,44 @@ sub do_one_test($$)
         # So, we search progB.done during max 100 times 100 millisecond.
         my $count;
         for ($count = 1; $count <= 100; $count++) {
-            (-f "progB.done") or select(undef, undef, undef, 0.100);
+            (-f "$dir/progB.done") or select(undef, undef, undef, 0.100);
         }
         # Filter stdout
         if (defined $stdoutB_filter) {
             $stdoutB_filter_args = $name if (! defined $stdoutB_filter_args);
-            mysystem("$stdoutB_filter $stdoutB_filter_args < $name.stdoutB.out > $tmp");
-            filtered_rename($tmp, "$name.stdoutB.out");
+            mysystem("cd $dir; $stdoutB_filter $stdoutB_filter_args < $name.stdoutB.out > $tmp");
+            filtered_rename($tmp_fullpath, "$fullname.stdoutB.out");
         }
         # Find all the .stdoutB.exp files.  If none, use /dev/null.
-        my @stdoutB_exps = <$name.stdoutB.exp*>;
+        my @stdoutB_exps = <$fullname.stdoutB.exp*>;
         @stdoutB_exps = ( "/dev/null" ) if (0 == scalar @stdoutB_exps);
-        do_diffs($fullname, $name, "stdoutB", \@stdoutB_exps); 
+        do_diffs($fullname, $fullname, "stdoutB", \@stdoutB_exps);
         
         # Filter stderr
         $stderrB_filter_args = $name if (! defined $stderrB_filter_args);
-        mysystem("$stderrB_filter $stderrB_filter_args < $name.stderrB.out > $tmp");
-        filtered_rename($tmp, "$name.stderrB.out");
+        mysystem("cd $dir; $stderrB_filter $stderrB_filter_args < $name.stderrB.out > $tmp");
+        filtered_rename($tmp_fullpath, "$fullname.stderrB.out");
         # Find all the .stderrB.exp files.  At least one must exist.
-        my @stderrB_exps = <$name.stderrB.exp*>;
+        my @stderrB_exps = <$fullname.stderrB.exp*>;
         (0 != scalar @stderrB_exps) or die "Could not find `$name.stderrB.exp*'\n";
-        do_diffs($fullname, $name, "stderrB", \@stderrB_exps); 
+        do_diffs($fullname, $fullname, "stderrB", \@stderrB_exps);
     }
 
     # Maybe do post-test check
     if (defined $post) {
-	if (mysystem("$post > $name.post.out") != 0) {
+	if (mysystem("cd $dir; $post > $name.post.out") != 0) {
 	    print("post check failed: $post\n");
 	    $num_failures{"post"}++;
 	} else {
 	    # Find all the .post.exp files.  If none, use /dev/null.
-	    my @post_exps = <$name.post.exp*>;
+	    my @post_exps = <$fullname.post.exp*>;
 	    @post_exps = ( "/dev/null" ) if (0 == scalar @post_exps);
-	    do_diffs($fullname, $name, "post", \@post_exps);
+	    do_diffs($fullname, $fullname, "post", \@post_exps);
 	}
     }
  
     if (defined $cleanup) {
-        (system("$cleanup") == 0) or 
+        (system("cd $dir; $cleanup") == 0) or
             print("(cleanup operation failed: $cleanup)\n");
     }
 
@@ -557,6 +571,8 @@ sub do_one_test($$)
 # Test one directory (and any subdirs)
 #----------------------------------------------------------------------------
 sub test_one_dir($$);    # forward declaration
+
+
 
 sub test_one_dir($$) 
 {
@@ -589,20 +605,28 @@ sub test_one_dir($$)
     my $found_tests = (0 != (grep { $_ =~ /\.vgtest$/ } @fs));
 
     if ($found_tests) {
-        print "-- Running  tests in $full_dir $dashes\n";
+        print "-- Scanning tests in $full_dir $dashes\n";
     }
     foreach my $f (@fs) {
         if (-d $f) {
             test_one_dir($f, $full_dir);
         } elsif ($f =~ /\.vgtest$/) {
-            do_one_test($full_dir, $f);
+	    push @testqueue, [$full_dir, $f];
         }
     }
     if ($found_tests) {
-        print "-- Finished tests in $full_dir $dashes\n";
+        print "-- Leaving $full_dir ----------$dashes\n";
     }
 
     chdir("..");
+}
+
+sub run_tests() {
+    foreach my $task (@testqueue) {
+	my ($full_dir, $f) = @$task;
+	print "-- Executing test $f in $full_dir --\n";
+	do_one_test($full_dir, $f);
+    }
 }
 
 #----------------------------------------------------------------------------
@@ -656,6 +680,7 @@ my @fs = process_command_line();
 foreach my $f (@fs) {
     if (-d $f) {
         test_one_dir($f, "");
+	chdir($tests_dir) or die "Could not change back to toplevel\n";
     } else { 
         # Allow the .vgtest suffix to be given or omitted
         if ($f =~ /.vgtest$/ && -r $f) {
@@ -667,11 +692,10 @@ foreach my $f (@fs) {
         }
         my $dir  = `dirname  $f`;   chomp $dir;
         my $file = `basename $f`;   chomp $file;
-        chdir($dir) or die "Could not change into $dir\n";
-        do_one_test($dir, $file);
-        chdir($tests_dir);
+        push @testqueue, [$dir, $file];
     }
 }
+run_tests();
 summarise_results();
 
 if ($ENV{"EXTRA_REGTEST_OPTS"}) {
