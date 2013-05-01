@@ -125,10 +125,10 @@ my $jobs_supported;
 BEGIN {
     eval {
 	$jobs_supported = 0;
-	require threads;
-	threads->import;
-	require threads::shared;
-	threads::shared->import;
+	require forks;
+	forks->import;
+	require forks::shared;
+	forks::shared->import;
 	$jobs_supported = 1;
     };
     if ($@) {
