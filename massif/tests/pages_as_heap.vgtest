@@ -1,6 +1,6 @@
 prog: pages_as_heap
-vgopts: --stacks=no --time-unit=B --heap-admin=0 --pages-as-heap=yes --massif-out-file=massif.out --detailed-freq=3
+vgopts: --stacks=no --time-unit=B --heap-admin=0 --pages-as-heap=yes --massif-out-file=massif.pages_as_heap.out --detailed-freq=3
 vgopts: --ignore-fn=mmap
 # would be nice to test that pages as heap works properly using
-# post: perl ../../massif/ms_print massif.out | ../../tests/filter_addresses
-cleanup: rm massif.out
+# post: perl ../../massif/ms_print massif.pages_as_heap.out | ../../tests/filter_addresses
+cleanup: rm massif.pages_as_heap.out
