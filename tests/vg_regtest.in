@@ -440,7 +440,9 @@ sub do_one_test($$)
     my $maybe_extraopts = $ENV{"EXTRA_REGTEST_OPTS"};
     my $extraopts = $maybe_extraopts ?  $maybe_extraopts  : "";
 
-    my $tmp = "${tmp_prefix}." . threads->tid();
+    my $threadid = threads->tid();
+    my $prefix = $threadid > 0 ? sprintf("[%2d] ", $threadid) : "";
+    my $tmp = "${tmp_prefix}." . $threadid;
     my $tmp_fullpath = "$dir/$tmp";
 
     read_vgtest_file("$dir", "$dir/$vgtest");
@@ -452,20 +454,20 @@ sub do_one_test($$)
         } elsif (256 == $prereq_res) {
             # Nb: weird Perl-ism -- exit code of '1' is seen by Perl as 256...
             # Prereq failed, skip.
-            printf("%-16s (skipping, prereq failed: $prereq)\n", "$name:");
+            printf("${prefix}%-30s (skipping, prereq failed: $prereq)\n", "$fullname:");
             return;
         } else {
             # Bad prereq; abort.
             $prereq_res /= 256;
-            die "prereq returned $prereq_res: $prereq\n";
+            die "${prefix}prereq returned $prereq_res: $prereq\n";
         }
     }
 
 
     if (defined $progB) {
         # If there is a progB, let's start it in background:
-        printf("%-16s valgrind $extraopts $vgopts $prog $args (progB: $progB $argsB)\n",
-               "$name:");
+        printf("${prefix}%-30s valgrind $extraopts $vgopts $prog $args (progB: $progB $argsB)\n",
+               "$fullname:");
         # progB.done used to detect child has finished. See below.
         # Note: redirection of stdout and stderr is before $progB to allow argsB
         # to e.g. redirect stdoutB to stderrB
@@ -479,7 +481,7 @@ sub do_one_test($$)
                      . "touch progB.done)  &");
         }
     } else {
-        printf("%-16s valgrind $extraopts $vgopts $prog $args\n", "$name:");
+        printf("${prefix}%-30s valgrind $extraopts $vgopts $prog $args\n", "$fullname:");
     }
  
     # Pass the appropriate --tool option for the directory (can be overridden
@@ -564,7 +566,7 @@ sub do_one_test($$)
     # Maybe do post-test check
     if (defined $post) {
 	if (mysystem("cd $dir; $post > $name.post.out") != 0) {
-	    print("post check failed: $post\n");
+	    print("${prefix}post check failed: $post\n");
 	    {
 		lock(%num_failures);
 		$num_failures{"post"}++;
@@ -579,7 +581,7 @@ sub do_one_test($$)
  
     if (defined $cleanup) {
         (system("cd $dir; $cleanup") == 0) or
-            print("(cleanup operation failed: $cleanup)\n");
+            print("${prefix}(cleanup operation failed: $cleanup)\n");
     }
 
     {
@@ -646,7 +648,6 @@ sub test_one_dir($$)
 sub run_tests_unthreaded() {
     foreach my $task (@testqueue) {
 	my ($full_dir, $f) = @$task;
-	print "-- Executing test $f in $full_dir --\n";
 	do_one_test($full_dir, $f);
     }
 }
@@ -661,7 +662,6 @@ sub run_test_worker() {
 	}
 	return if !defined $task;
 	my ($full_dir, $f) = @$task;
-	print "-- [$tid] Executing test $f in $full_dir --\n";
 	do_one_test($full_dir, $f);
     }
 }
