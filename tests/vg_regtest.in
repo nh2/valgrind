@@ -120,8 +120,22 @@
 use warnings;
 use strict;
 
-use forks;
-use threads::shared;
+my $jobs_supported;
+
+BEGIN {
+    eval {
+	$jobs_supported = 0;
+	require forks;
+	forks->import;
+	require forks::shared;
+	forks::shared->import;
+	$jobs_supported = 1;
+    };
+    if ($@) {
+	no strict 'refs';
+	*share = sub (\[$@%]) {}
+    };
+};
 
 #----------------------------------------------------------------------------
 # Global vars
@@ -156,13 +170,20 @@ my $prereq;             # prerequisite test to satisfy before running test
 my $post;               # check command after running test
 my $cleanup;            # cleanup command to run
 
-my @testqueue :shared;  # List of tests to run
-my @failures :shared;   # List of failed tests
+my @testqueue;  # List of tests to run
+my @failures;   # List of failed tests
 
-my $num_tests_done :shared = 0;
-my %num_failures :shared = (stderr => 0, stdout => 0,
-                            stderrB => 0, stdoutB => 0,
-                            post => 0);
+my $num_tests_done = 0;
+my %num_failures = (stderr => 0, stdout => 0,
+		    stderrB => 0, stdoutB => 0,
+		    post => 0);
+
+if ($jobs_supported) {
+    share(@testqueue);
+    share(@failures);
+    share($num_tests_done);
+    share(%num_failures);
+}
 
 # Default valgrind to use is this build tree's (uninstalled) one
 my $valgrind = "./coregrind/valgrind";
@@ -240,7 +261,7 @@ sub process_command_line()
             } elsif ($arg =~ /^--keep-unfiltered$/) {
                 $keepunfiltered = 1;
             } elsif ($arg =~ /^--jobs=(\d+)$/) {
-                $jobs = $1;
+		$jobs = $1;
             } elsif ($arg =~ /^-j(\d+)$/) {
                 $jobs = $1;
             } else {
@@ -250,6 +271,12 @@ sub process_command_line()
             push(@fs, $arg);
         }
     }
+
+    if ($jobs > 0 && !$jobs_supported) {
+	print STDERR "WARNING: this perl does not have 'use forks', --jobs ignored\n";
+	$jobs = 0;
+    }
+
     $valgrind = validate_program($tests_dir, $valgrind, 1, 0);
     
     if (defined $outer_valgrind) {
@@ -419,11 +446,11 @@ sub do_diffs($$$$)
     # If we reach here, none of the .exp files matched.
     print "*** $name failed ($mid) ***\n";
     {
-	lock(@failures);
+	lock(@failures) if $jobs_supported;
 	push(@failures, sprintf("%-40s ($mid)", "$fullname"));
     }
     {
-	lock(%num_failures);
+	lock(%num_failures) if $jobs_supported;
 	$num_failures{$mid}++;
     }
 }
@@ -440,7 +467,7 @@ sub do_one_test($$)
     my $maybe_extraopts = $ENV{"EXTRA_REGTEST_OPTS"};
     my $extraopts = $maybe_extraopts ?  $maybe_extraopts  : "";
 
-    my $threadid = threads->tid();
+    my $threadid = $jobs > 0 ? threads->tid() : 0;
     my $prefix = $threadid > 0 ? sprintf("[%2d] ", $threadid) : "";
     my $tmp = "${tmp_prefix}." . $threadid;
     my $tmp_fullpath = "$dir/$tmp";
@@ -568,7 +595,7 @@ sub do_one_test($$)
 	if (mysystem("cd $dir; $post > $name.post.out") != 0) {
 	    print("${prefix}post check failed: $post\n");
 	    {
-		lock(%num_failures);
+		lock(%num_failures) if $jobs_supported;
 		$num_failures{"post"}++;
 	    }
 	} else {
@@ -585,7 +612,7 @@ sub do_one_test($$)
     }
 
     {
-	lock($num_tests_done);
+	lock($num_tests_done) if $jobs_supported;
 	$num_tests_done++;
     }
 }
@@ -634,7 +661,8 @@ sub test_one_dir($$)
         if (-d $f) {
             test_one_dir($f, $full_dir);
         } elsif ($f =~ /\.vgtest$/) {
-	    my @task :shared = ($full_dir, $f);
+	    my @task = ($full_dir, $f);
+	    share(@task) if $jobs_supported;
 	    push @testqueue, \@task;
         }
     }
@@ -657,7 +685,7 @@ sub run_test_worker() {
     while (1) {
 	my $task = undef;
 	{
-	    lock(@testqueue);
+	    lock(@testqueue) if $jobs_supported;
 	    $task = pop @testqueue;
 	}
 	return if !defined $task;
@@ -746,7 +774,8 @@ foreach my $f (@fs) {
         }
         my $dir  = `dirname  $f`;   chomp $dir;
         my $file = `basename $f`;   chomp $file;
-	my @task :shared = ($dir, $file);
+	my @task = ($dir, $file);
+	share(@task) if $jobs_supported;
         push @testqueue, \@task;
     }
 }
