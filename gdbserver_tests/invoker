@@ -12,8 +12,8 @@ shift
 i=0
 while [ $i -lt $LOOPS ]
 do
-   ./vgdb "$@"  
+   ../coregrind/vgdb "$@"
    i=`expr $i + 1`
 done
 
-./vgdb "$@"  -c v.kill
+../coregrind/vgdb "$@"  -c v.kill
