@@ -70,6 +70,11 @@ EXTRA_DIST = \
 	rcl-amd64.vgtest rcl-amd64.stdout.exp rcl-amd64.stderr.exp \
 	redundantRexW.vgtest redundantRexW.stdout.exp \
 	redundantRexW.stderr.exp \
+	round.stderr.exp round.stdout.exp round.vgtest \
+	round_simd.stderr.exp round_simd.stdout.exp \
+	round_simd_sse.stderr.exp round_simd_sse.stdout.exp round_simd_sse.vgtest \
+	round_simd_sse2.stderr.exp round_simd_sse2.stdout.exp round_simd_sse2.vgtest \
+	round_simd_avx.stderr.exp round_simd_avx.stdout.exp round_simd_avx.vgtest \
 	smc1.stderr.exp smc1.stdout.exp smc1.vgtest \
 	sbbmisc.stderr.exp sbbmisc.stdout.exp sbbmisc.vgtest \
 	shrld.stderr.exp shrld.stdout.exp shrld.vgtest \
@@ -92,6 +97,7 @@ check_PROGRAMS = \
 	nan80and64 \
 	rcl-amd64 \
 	redundantRexW \
+	round \
 	smc1 \
 	sbbmisc \
 	nibz_bennee_mmap \
@@ -166,6 +172,36 @@ insn_fpu_SOURCES	= insn_fpu.def
 insn_fpu_LDADD		= -lm
 insn_pclmulqdq_SOURCES  = insn_pclmulqdq.def
 fxtract_LDADD		= -lm
+round_CFLAGS		= -frounding-math
+round_LDADD		= -lm
+
+if BUILD_GCC_SIMD_TESTS
+if BUILD_FESETROUND_TESTS
+# We build various versions of the SIMD rounding mode test: SSE for
+# ADDPS and friends; SSE2 for *PD; AVX for V*PS and V*PD
+if BUILD_SSE_TESTS
+check_PROGRAMS += round_simd_sse
+round_simd_sse_SOURCES	= round_simd.c
+round_simd_sse_CFLAGS	= -frounding-math -O2 -msse
+round_simd_sse_LDADD	= -lm
+endif
+
+if BUILD_SSE2_TESTS
+check_PROGRAMS += round_simd_sse2
+round_simd_sse2_SOURCES	= round_simd.c
+round_simd_sse2_CFLAGS	= -frounding-math -O2 -msse2
+round_simd_sse2_LDADD	= -lm
+endif
+
+if BUILD_AVX2_TESTS
+check_PROGRAMS += round_simd_avx
+round_simd_avx_SOURCES	= round_simd.c
+round_simd_avx_CFLAGS	= -frounding-math -O2 -mavx
+round_simd_avx_LDADD	= -lm
+endif
+
+endif # BUILD_FESETROUND_TESTS
+endif # BUILD_GCC_SIMD_TESTS
 
 .def.c: $(srcdir)/gen_insn_test.pl
 	$(PERL) $(srcdir)/gen_insn_test.pl < $< > $@

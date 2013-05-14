@@ -3,7 +3,7 @@ include $(top_srcdir)/Makefile.tool-tests.am
 
 dist_noinst_SCRIPTS = filter_stderr
 
-INSN_TESTS = insn_basic insn_mmx insn_sse insn_sse2 insn_fpu
+INSN_TESTS = insn_basic insn_mmx insn_sse insn_sse2 insn_fpu avx-1 avx2-1
 
 EXTRA_DIST = \
 	$(addsuffix .stderr.exp,$(INSN_TESTS)) \

@@ -123,28 +123,13 @@ postamble:
            hold another word (for CHAIN_ME exits, the
            address of the place to patch.) */
         
-	/* We're leaving.  Check that nobody messed with %mxcsr
-           or %fpucw.  We can't mess with %rax or %rdx here as they
-           hold the tentative return values, but any others are OK. */
-#if !defined(ENABLE_INNER)
-        /* This check fails for self-hosting, so skip in that case */
-	pushq	$0
-	fstcw	(%rsp)
-	cmpl	$0x027F, (%rsp)
-	popq	%r15 /* get rid of the word without trashing %rflags */
-	jnz	invariant_violation
-#endif
-	pushq	$0
-	stmxcsr	(%rsp)
-	andl	$0xFFFFFFC0, (%rsp)  /* mask out status flags */
-	cmpl	$0x1F80, (%rsp)
-	popq	%r15
-	jnz	invariant_violation
-	/* otherwise we're OK */
-	jmp	remove_frame
-invariant_violation:
-	movq	$VG_TRC_INVARIANT_FAILED, %rax
-        movq    $0, %rdx
+        /* We're leaving.  Reset %mxcsr and %fpucw to a known value,
+           the VEX code may have changed the rounding mode. */
+        pushq   $0x027F
+        fldcw   (%rsp)
+        movq    $0x1F80,(%rsp)
+        ldmxcsr (%rsp)
+        popq    %r15
 
 remove_frame:
         /* Pop %rdi, stash return values */

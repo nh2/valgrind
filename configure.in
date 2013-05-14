@@ -1418,6 +1418,28 @@ AC_MSG_RESULT([no])
 CFLAGS=$safe_CFLAGS
 
 AC_SUBST(FLAG_MSSE)
+AM_CONDITIONAL(BUILD_SSE_TESTS, test x$FLAG_MSSE = x-msse)
+
+
+# does this compiler support -msse2 ?
+AC_MSG_CHECKING([if gcc accepts -msse2])
+
+safe_CFLAGS=$CFLAGS
+CFLAGS="-msse2"
+
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[
+  return 0;
+]])], [
+FLAG_MSSE2="-msse2"
+AC_MSG_RESULT([yes])
+], [
+FLAG_MSSE2=""
+AC_MSG_RESULT([no])
+])
+CFLAGS=$safe_CFLAGS
+
+AC_SUBST(FLAG_MSSE2)
+AM_CONDITIONAL(BUILD_SSE2_TESTS, test x$FLAG_MSSE2 = x-msse2)
 
 
 # does this compiler support -mpreferred-stack-boundary=2 ?
@@ -2001,6 +2023,54 @@ AC_MSG_RESULT([no])
 ])
 
 AM_CONDITIONAL(BUILD_MOVBE_TESTS, test x$ac_have_as_movbe = xyes)
+
+
+# Does your GCC understand the vector_size attribute?
+# Note, this doesn't generate a C-level symbol.  It generates a
+# automake-level symbol (BUILD_GCC_SIMD_TESTS), used in test Makefile.am's
+AC_MSG_CHECKING([if gcc understands __attribute__((vector_size(N)))])
+
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[
+  do {
+    double x __attribute__((vector_size(16))) = {0.0};
+    x += 1.0; /* tests scalar->vector implicit cast */
+  } while (0)
+]])], [
+ac_have_gcc_vector_types=yes
+AC_MSG_RESULT([yes])
+], [
+ac_have_gcc_vector_types=no
+AC_MSG_RESULT([no])
+])
+
+AM_CONDITIONAL(BUILD_GCC_SIMD_TESTS, test x$ac_have_gcc_vector_types = xyes)
+
+
+# Does the C compiler support the "fesetround" function?
+# Note, this doesn't generate a C-level symbol.  It generates a
+# automake-level symbol (BUILD_IFUNC_TESTS), used in test Makefile.am's
+AC_MSG_CHECKING([for fesetround() support])
+
+saved_LDFLAGS="$LDFLAGS"
+LDFLAGS="$LDFLAGS -lm"
+AC_LINK_IFELSE([AC_LANG_SOURCE([[
+#include <fenv.h>
+
+int main()
+{
+    fesetround(FE_UPWARD);
+    return 0;
+}
+]])], [
+ac_have_fesetround=yes
+AC_MSG_RESULT([yes])
+], [
+ac_have_fesetround=no
+AC_MSG_RESULT([no])
+])
+LDFLAGS="$saved_LDFLAGS"
+
+AM_CONDITIONAL(BUILD_FESETROUND_TESTS, test x$ac_have_fesetround = xyes)
 
 
 # Does the C compiler support the "ifunc" attribute

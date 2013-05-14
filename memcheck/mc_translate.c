@@ -2574,6 +2574,51 @@ IRAtom* binary16Ix2 ( MCEnv* mce, IRAtom* vatom1, IRAtom* vatom2 )
    return at;   
 }
 
+/*
+ * Rounded binary <op><width>Fx<n>: we declare the whole result
+ * undefined if the rounding mode is undefined.  ity specifies the
+ * result type (width*n).
+ */
+static
+IRAtom* roundedFxN ( MCEnv* mce, IRType ity, IRAtom* vopresult, IRAtom* vround )
+{
+   IRAtom* at;
+   at = mkPCastTo(mce, ity, vround);
+   return mkUifU(mce, ity, vopresult, at);
+}
+
+/*
+ * Rounded binary <op><width>F0x<n>: we declare the result undefined
+ * if the rounding mode is undefined, but the op only affects the
+ * lowermost <width>, so we must leave the upper part of definedness
+ * untouched too.  ity specifies the result type (width*n).
+ */
+static
+IRAtom* roundedF0xN ( MCEnv* mce, IRType ity, IRAtom* vopresult, IRAtom* vround )
+{
+   IRExpr *vround_wide;
+   IRAtom *at;
+   IRType srcty = typeOfIRExpr(mce->sb->tyenv, vround);
+
+   if (ity == Ity_V128 && srcty == Ity_I32) {
+      vround_wide = unop(Iop_32UtoV128, mkPCastTo(mce, Ity_I32, vround));
+   } else if (ity == Ity_V128 && srcty == Ity_I64) {
+      vround_wide = binop(Iop_64HLtoV128,
+                          definedOfType(Ity_I64),
+                          mkPCastTo(mce, Ity_I64, vround));
+   } else {
+      VG_(printf)("\nsrc: ");
+      ppIRType(srcty);
+      VG_(printf)("\ntarget: ");
+      ppIRType(ity);
+      VG_(printf)("\n");
+      VG_(tool_panic)("memcheck:roundedF0xN");
+   }
+
+   at = assignNew('V', mce, ity, vround_wide);
+   return mkUifU(mce, ity, vopresult, at);
+}
+
 
 /*------------------------------------------------------------*/
 /*--- Generate shadow values from all kinds of IRExprs.    ---*/
@@ -2705,6 +2750,48 @@ IRAtom* expr2vbits_Triop ( MCEnv* mce,
       case Iop_SetElem32x2:
          complainIfUndefined(mce, atom2, NULL);
          return assignNew('V', mce, Ity_I64, triop(op, vatom1, atom2, vatom3));
+
+      case Iop_Sub64Fx2:
+      case Iop_Mul64Fx2:
+      case Iop_Div64Fx2:
+      case Iop_Add64Fx2:
+         return roundedFxN(mce, Ity_V128, binary64Fx2(mce, vatom2, vatom3), vatom1);
+
+      case Iop_Sub32Fx4:
+      case Iop_Mul32Fx4:
+      case Iop_Div32Fx4:
+      case Iop_Add32Fx4:
+         return roundedFxN(mce, Ity_V128, binary32Fx4(mce, vatom2, vatom3), vatom1);
+
+      case Iop_Sub32Fx2:
+      case Iop_Mul32Fx2:
+      case Iop_Add32Fx2:
+         return roundedFxN(mce, Ity_I64, binary32Fx2(mce, vatom2, vatom3), vatom1);
+
+      case Iop_Mul64Fx4:
+      case Iop_Div64Fx4:
+      case Iop_Add64Fx4:
+      case Iop_Sub64Fx4:
+         return roundedFxN(mce, Ity_V256, binary64Fx4(mce, vatom2, vatom3), vatom1);
+
+      case Iop_Add32Fx8:
+      case Iop_Sub32Fx8:
+      case Iop_Mul32Fx8:
+      case Iop_Div32Fx8:
+         return roundedFxN(mce, Ity_V256, binary32Fx8(mce, vatom2, vatom3), vatom1);
+
+      case Iop_Sub64F0x2:
+      case Iop_Mul64F0x2:
+      case Iop_Div64F0x2:
+      case Iop_Add64F0x2:
+         return roundedF0xN(mce, Ity_V128, binary64F0x2(mce, vatom2, vatom3), vatom1);
+
+      case Iop_Sub32F0x4:
+      case Iop_Mul32F0x4:
+      case Iop_Div32F0x4:
+      case Iop_Add32F0x4:
+         return roundedF0xN(mce, Ity_V128, binary32F0x4(mce, vatom2, vatom3), vatom1);
+
       default:
          ppIROp(op);
          VG_(tool_panic)("memcheck:expr2vbits_Triop");
@@ -3148,69 +3235,68 @@ IRAtom* expr2vbits_Binop ( MCEnv* mce,
       case Iop_QNarrowBin16Sto8Ux16:
          return vectorNarrowBinV128(mce, op, vatom1, vatom2);
 
-      case Iop_Sub64Fx2:
-      case Iop_Mul64Fx2:
       case Iop_Min64Fx2:
       case Iop_Max64Fx2:
-      case Iop_Div64Fx2:
       case Iop_CmpLT64Fx2:
       case Iop_CmpLE64Fx2:
       case Iop_CmpEQ64Fx2:
       case Iop_CmpUN64Fx2:
-      case Iop_Add64Fx2:
          return binary64Fx2(mce, vatom1, vatom2);      
 
-      case Iop_Sub64F0x2:
-      case Iop_Mul64F0x2:
       case Iop_Min64F0x2:
       case Iop_Max64F0x2:
-      case Iop_Div64F0x2:
       case Iop_CmpLT64F0x2:
       case Iop_CmpLE64F0x2:
       case Iop_CmpEQ64F0x2:
       case Iop_CmpUN64F0x2:
-      case Iop_Add64F0x2:
          return binary64F0x2(mce, vatom1, vatom2);      
 
-      case Iop_Sub32Fx4:
-      case Iop_Mul32Fx4:
       case Iop_Min32Fx4:
       case Iop_Max32Fx4:
-      case Iop_Div32Fx4:
       case Iop_CmpLT32Fx4:
       case Iop_CmpLE32Fx4:
       case Iop_CmpEQ32Fx4:
       case Iop_CmpUN32Fx4:
       case Iop_CmpGT32Fx4:
       case Iop_CmpGE32Fx4:
-      case Iop_Add32Fx4:
       case Iop_Recps32Fx4:
       case Iop_Rsqrts32Fx4:
          return binary32Fx4(mce, vatom1, vatom2);      
 
-      case Iop_Sub32Fx2:
-      case Iop_Mul32Fx2:
       case Iop_Min32Fx2:
       case Iop_Max32Fx2:
       case Iop_CmpEQ32Fx2:
       case Iop_CmpGT32Fx2:
       case Iop_CmpGE32Fx2:
-      case Iop_Add32Fx2:
       case Iop_Recps32Fx2:
       case Iop_Rsqrts32Fx2:
          return binary32Fx2(mce, vatom1, vatom2);      
 
-      case Iop_Sub32F0x4:
-      case Iop_Mul32F0x4:
       case Iop_Min32F0x4:
       case Iop_Max32F0x4:
-      case Iop_Div32F0x4:
       case Iop_CmpLT32F0x4:
       case Iop_CmpLE32F0x4:
       case Iop_CmpEQ32F0x4:
       case Iop_CmpUN32F0x4:
-      case Iop_Add32F0x4:
          return binary32F0x4(mce, vatom1, vatom2);      
+
+      case Iop_Sqrt32Fx4:
+         return roundedFxN(mce, Ity_V128, unary32Fx4(mce, vatom2), vatom1);
+
+      case Iop_Sqrt64Fx2:
+         return roundedFxN(mce, Ity_V128, unary64Fx2(mce, vatom2), vatom1);
+
+      case Iop_Sqrt32Fx8:
+         return roundedFxN(mce, Ity_V256, unary32Fx8(mce, vatom2), vatom1);
+
+      case Iop_Sqrt64Fx4:
+         return roundedFxN(mce, Ity_V256, unary64Fx4(mce, vatom2), vatom1);
+
+      case Iop_Sqrt32F0x4:
+         return roundedF0xN(mce, Ity_V128, unary32F0x4(mce, vatom2), vatom1);
+
+      case Iop_Sqrt64F0x2:
+         return roundedF0xN(mce, Ity_V128, unary64F0x2(mce, vatom2), vatom1);
 
       case Iop_QShlN8Sx16:
       case Iop_QShlN8x16:
@@ -3373,18 +3459,10 @@ IRAtom* expr2vbits_Binop ( MCEnv* mce,
 
       /* V256-bit SIMD */
 
-      case Iop_Add64Fx4:
-      case Iop_Sub64Fx4:
-      case Iop_Mul64Fx4:
-      case Iop_Div64Fx4:
       case Iop_Max64Fx4:
       case Iop_Min64Fx4:
          return binary64Fx4(mce, vatom1, vatom2);
 
-      case Iop_Add32Fx8:
-      case Iop_Sub32Fx8:
-      case Iop_Mul32Fx8:
-      case Iop_Div32Fx8:
       case Iop_Max32Fx8:
       case Iop_Min32Fx8:
          return binary32Fx8(mce, vatom1, vatom2);
@@ -3855,21 +3933,10 @@ IRExpr* expr2vbits_Unop ( MCEnv* mce, IROp op, IRAtom* atom )
    tl_assert(isOriginalAtom(mce,atom));
    switch (op) {
 
-      case Iop_Sqrt64Fx2:
-         return unary64Fx2(mce, vatom);
-
-      case Iop_Sqrt64F0x2:
-         return unary64F0x2(mce, vatom);
-
-      case Iop_Sqrt32Fx8:
       case Iop_RSqrt32Fx8:
       case Iop_Recip32Fx8:
          return unary32Fx8(mce, vatom);
 
-      case Iop_Sqrt64Fx4:
-         return unary64Fx4(mce, vatom);
-
-      case Iop_Sqrt32Fx4:
       case Iop_RSqrt32Fx4:
       case Iop_Recip32Fx4:
       case Iop_I32UtoFx4:
@@ -3895,7 +3962,6 @@ IRExpr* expr2vbits_Unop ( MCEnv* mce, IROp op, IRAtom* atom )
       case Iop_Rsqrte32Fx2:
          return unary32Fx2(mce, vatom);
 
-      case Iop_Sqrt32F0x4:
       case Iop_RSqrt32F0x4:
       case Iop_Recip32F0x4:
          return unary32F0x4(mce, vatom);
