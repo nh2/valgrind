@@ -833,6 +833,18 @@ typedef
 
       /* ------------------ 64-bit SIMD FP ------------------------ */
 
+      /*
+       * Rounding modes in SIMD FP: the instructions that round
+       * according to rounding mode settings are "the obvious ones"
+       * (Add Sub Mul Div Sqrt).  RSqrt and Recip are notably absent;
+       * on x86/amd64 they are specified as not respecting the
+       * rounding mode flags.
+       *
+       * Therefore all variations of SIMD FP Add, Sub, Mul, Div and
+       * Sqrt below have an extra IRRoundingMode(I32) argument in
+       * addition to the usual unary/binary arguments.
+       */
+
       /* Convertion to/from int */
       Iop_I32UtoFx2,  Iop_I32StoFx2,    /* I32x4 -> F32x4 */
       Iop_FtoI32Ux2_RZ,  Iop_FtoI32Sx2_RZ,    /* F32x4 -> I32x4 */
